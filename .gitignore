@@ -1,0 +1,17 @@
+# Python temporary files
+__pycache__/
+*.pyc
+.env
+
+# Common editor configuration
+.vscode/
+.idea/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+
+# Any file with your secrets!
+# (Example: if you have a file named 'keys.py', add it here)
+# keys.py
+# config.py

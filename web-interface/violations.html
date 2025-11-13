@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IVCS - Live Violation Feed</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            padding: 20px;
+            background-color: #f8f9fa;
+            color: #212529;
+        }
+
+        h1 {
+            color: #343a40;
+            border-bottom: 2px solid #dee2e6;
+            padding-bottom: 10px;
+        }
+
+        /* Styles for the table */
+        table {
+            width: 100%;
+            border-collapse: collapse; /* single-line borders */
+            margin-top: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+            background-color: #fff;
+            border-radius: 8px;
+            overflow: hidden; /* For border-radius */
+        }
+
+        /* Table header styles */
+        th {
+            background-color: #f1f3f5;
+            color: #495057;
+            font-weight: 600;
+            text-align: left;
+            padding: 16px 20px;
+            text-transform: uppercase;
+            font-size: 12px;
+            letter-spacing: 0.5px;
+        }
+
+        /* Table cell styles */
+        td {
+            padding: 16px 20px;
+            border-bottom: 1px solid #dee2e6;
+            color: #495057;
+            font-size: 14px;
+        }
+
+        /* Remove bottom border from last row */
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* Style every other row for readability */
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        /* --- Style for the location button --- */
+        .location-btn {
+            background-color: #007bff; 
+            color: white;
+            padding: 8px 12px;
+            text-decoration: none; /* Remove underline from link */
+            border-radius: 5px;
+            display: inline-block; /* Allows padding and margins */
+            font-size: 13px;
+            font-weight: 500;
+            transition: background-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .location-btn:hover {
+            background-color: #0056b3; /* Darker blue on hover */
+            color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        /* --- Status Indicators --- */
+        .status-on {
+            color: #28a745;
+            font-weight: 600;
+        }
+        .status-off {
+            color: #dc3545;
+            font-weight: 600;
+        }
+        .status-neutral {
+            color: #6c757d;
+        }
+
+    </style>
+</head>
+<body>
+
+    <h1>Live Violation Feed</h1>
+    <p>A summarized list of all POSSIBLE contingencies as detected by the devices on the run</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Vehicle Plate</th>
+                <th>Time</th>
+                <th>Speed (km/h)</th>
+                <th>RPM</th>
+                <th>Throttle (%)</th>
+                <th>Brake</th>
+                <th>Lights</th>
+                <th>Signal</th>
+                <th>Location</th>
+            </tr>
+        </thead>
+        <!-- The table body will be populated dynamically by JavaScript -->
+        <tbody id="violations-tbody">
+            <!-- Example of a loading state (optional) -->
+            <tr>
+                <td colspan="9" style="text-align: center; color: #6c757d;">Loading data...</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <script>
+        // Wait for the DOM to be fully loaded before running the script
+        document.addEventListener('DOMContentLoaded', function() {
+            
+            const tbody = document.getElementById('violations-tbody');
+
+            async function fetchViolations() {
+                try {
+                    // Call your new PHP script
+                    const response = await fetch('get_violations.php');
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    const violations = await response.json();
+
+                    // Clear the "Loading..." row
+                    tbody.innerHTML = '';
+
+                    // Check if any violations were returned
+                    if (violations.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #6c757d;">No violations found.</td></tr>';
+                        return;
+                    }
+
+                    // Loop through each violation and create a table row
+                    violations.forEach(v => {
+                        const tr = document.createElement('tr');
+
+                        // ---to create a cell ---
+                        const createCell = (html, align = 'left') => {
+                            const td = document.createElement('td');
+                            td.innerHTML = html;
+                            td.style.textAlign = align;
+                            return td;
+                        };
+
+                        // --- Format Data for Display ---
+                        
+                        // 1. Format Time 
+                        const time = new Date(v.data_time);
+                        const formattedTime = time.toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            hour12: true
+                        });
+
+                        // 2. Format Brake Status
+                        const brake = v.brake_status == 1 
+                            ? '<span class="status-on">ON</span>' 
+                            : '<span class="status-neutral">OFF</span>';
+
+                        // 3. Format Headlight Status
+                        const lights = v.headlight_state == 1
+                            ? '<span class="status-on">ON</span>'
+                            : '<span class="status-neutral">OFF</span>';
+                        
+                        // 4. Format Signal Status
+                        let signal = '';
+                        if (v.signal_light_state && v.signal_light_state.toUpperCase() === 'LEFT') {
+                            signal = '<span class="status-on">&larr; LEFT</span>';
+                        } else if (v.signal_light_state && v.signal_light_state.toUpperCase() === 'RIGHT') {
+                            signal = '<span class="status-on">RIGHT &rarr;</span>';
+                        } else {
+                            signal = '<span class="status-neutral">OFF</span>';
+                        }
+
+                        // 5. Create Map Link
+                        const mapLink = `<a href="index.html?lat=${v.latitude}&lng=${v.longitude}" class="location-btn">
+                                            View on Map
+                                         </a>`;
+
+                        // --- Append all cells to the row ---
+                        tr.appendChild(createCell(v.vehicle_plate || 'N/A'));
+                        tr.appendChild(createCell(formattedTime));
+                        tr.appendChild(createCell(v.speed || '0'));
+                        tr.appendChild(createCell(v.rpm || '0'));
+                        tr.appendChild(createCell(v.throttle || '0'));
+                        tr.appendChild(createCell(brake));
+                        tr.appendChild(createCell(lights));
+                        tr.appendChild(createCell(signal));
+                        tr.appendChild(createCell(mapLink));
+
+                        // Add the new row to the table body
+                        tbody.appendChild(tr);
+                    });
+
+                } catch (error) {
+                    console.error('Error fetching violations:', error);
+                    tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: #dc3545;">Could not load data. ${error.message}</td></tr>`;
+                }
+            }
+
+            // --- Initial fetch ---
+            fetchViolations();
+
+            // --- Optional: Auto-refresh data every 30 seconds ---
+            setInterval(fetchViolations, 30000);
+        });
+    </script>
+
+</body>
+</html>

@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>IVCS - Live Vehicle Map </title>
+  <meta charset="utf-8" />
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    #map {
+      height: 100vh;
+      width: 100%;
+      position: relative;
+      z-index: 1;
+    }
+
+    .menu-toggle {
+      margin: 10px;
+      background: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 10px;
+      cursor: pointer;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    .menu-toggle .bar {
+      display: block;
+      width: 22px;
+      height: 3px;
+      background-color: #333;
+      margin: 4px 0;
+    }
+
+    .side-menu {
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100vh;
+      width: 300px;
+      background-color: #fff;
+      z-index: 2147483645;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      transform: translateX(-100%);
+      transition: transform 0.28s ease-in-out;
+      padding: 60px 20px 20px 20px;
+      box-sizing: border-box;
+      pointer-events: auto;
+      transform: translateZ(0);
+      will-change: transform;
+    }
+
+    .side-menu.open {
+      transform: translateX(0);
+    }
+
+    .side-menu h2 { margin-top: 0; }
+
+    .side-menu ul { list-style: none; padding: 0; margin: 0; }
+
+    .side-menu ul li {
+      padding: 15px 10px;
+      border-bottom: 1px solid #eee;
+      cursor: pointer;
+    }
+    .side-menu ul li:hover { background-color: #f9f9f9; }
+
+    #custom-menu {
+      display: none;
+      position: absolute;
+      background-color: white;
+      border: 1px solid #ccc;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+      border-radius: 5px;
+      z-index: 2147483647; /* topmost */
+      pointer-events: auto;
+      transform: translateZ(0);
+      will-change: transform;
+    }
+
+    #custom-menu ul { list-style: none; margin: 0; padding: 5px 0; }
+    #custom-menu ul li { padding: 8px 15px; cursor: pointer; }
+    #custom-menu ul li:hover { background-color: #f0f0f0; }
+
+    #upload-modal-backdrop {
+      display: none; /* Hidden by default */
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.6);
+      z-index: 2147483646; /* Just below max z-index */
+      justify-content: center;
+      align-items: center;
+    }
+
+    #upload-modal-content {
+      background-color: #fff;
+      padding: 20px 30px;
+      border-radius: 8px;
+      box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+      width: 90%;
+      max-width: 500px;
+    }
+    
+    #upload-modal-content h2 {
+      margin-top: 0;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 10px;
+    }
+
+    #upload-form input[type="file"] {
+      display: block;
+      width: 100%;
+      padding: 10px;
+      margin-bottom: 20px;
+      box-sizing: border-box;
+    }
+    
+    .modal-buttons {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    
+    .modal-buttons button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    
+    #modal-cancel-btn {
+      background-color: #f0f0f0;
+    }
+    
+    #modal-upload-btn {
+      background-color: #007bff;
+      color: white;
+    }
+    
+    #upload-status {
+      margin-top: 15px;
+      font-size: 0.9em;
+    }
+
+    /*  device marker - blue dot */
+    .device-marker-icon {
+      width: 16px;
+      height: 16px;
+      background-color: #0044FF;
+      border-radius: 50%;
+      border: 2px solid white;
+      box-shadow: 0 0 4px rgba(0,0,0,0.5);
+    }
+  </style>
+</head>
+<body>
+
+  <div id="map"></div>
+
+  <div id="custom-menu">
+    <ul>
+      <li id="report-landslide">Report an event</li>
+    </ul>
+  </div>
+
+  <div id="upload-modal-backdrop" style="display: none;">
+    <div id="upload-modal-content">
+      <h2>Upload the event Image</h2>
+      <p>Please select an image to upload for the system to analyze and decide on.</p>
+      
+      <form id="upload-form" onsubmit="return false;">
+        <input type="file" id="image-input" name="landslide_image" accept="image/png, image/jpeg, image/gif" required>
+        
+        <input type="hidden" id="upload-lat" name="latitude">
+        <input type="hidden" id="upload-lng" name="longitude">
+
+        <div class="modal-buttons">
+          <button type="button" id="modal-cancel-btn">Cancel</button>
+          <button type="submit" id="modal-upload-btn">Upload Image</button>
+        </div>
+        <div id="upload-status"></div>
+      </form> 
+    </div>
+  </div>
+
+  <button class="menu-toggle" id="menuButton" aria-label="Open menu">
+    <span class="bar"></span>
+    <span class="bar"></span>
+    <span class="bar"></span>
+  </button>
+
+  <div class="side-menu" id="sideMenu">
+    <h2>IVCS Project Menu</h2>
+    <ul>
+      <li id="btn-dashboard">Alerts</li>
+      <li id="btn-ambulance">Ambulance </li>
+      <li id="btn-violations">Contingency</li>
+    </ul>
+  </div>
+
+<script>
+  let map;
+  let deviceMarkers = {};
+  let infoWindow;
+  let rightClickLatLng;
+  let uploadModal = document.getElementById('upload-modal-backdrop');
+  let uploadStatus = document.getElementById('upload-status');
+
+  // stop native contextmenu on map 
+  document.addEventListener('contextmenu', function (ev) {
+    const mapDiv = document.getElementById('map');
+    if (mapDiv && (mapDiv === ev.target || mapDiv.contains(ev.target))) {
+      ev.preventDefault();
+    }
+  }, true);
+
+  async function initMap() {
+    const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+    //the Map library
+    const { Map } = await google.maps.importLibrary("maps");
+
+    infoWindow = new google.maps.InfoWindow();
+
+    const center = { lat: 6.7949, lng: 79.9007 };
+
+    map = new Map(document.getElementById('map'), {
+      zoom: 17,
+      center,
+      mapTypeId: 'roadmap',
+      disableDefaultUI: true,
+      // A mapId required for AdvancedMarkerElement
+      mapId: '**redacted**' 
+    });
+
+    const trafficLayer = new google.maps.TrafficLayer();
+    trafficLayer.setMap(map);
+
+
+    // Add the menu button to the map's UI controls.
+    const menuButton = document.getElementById('menuButton');
+    map.controls[google.maps.ControlPosition.TOP_LEFT].push(menuButton);
+
+    google.maps.event.addListenerOnce(map, 'idle', () => {
+      setTimeout(() => {
+        const sideMenu = document.getElementById('sideMenu');
+        const customMenu = document.getElementById('custom-menu');
+        // append to body to try keep them outside maps internal panes
+        if (sideMenu && sideMenu.parentNode !== document.body) document.body.appendChild(sideMenu);
+        if (customMenu && customMenu.parentNode !== document.body) document.body.appendChild(customMenu);
+      }, 40);
+    });
+
+    // Right click on map (Google Maps event)
+    map.addListener('rightclick', (e) => {
+      if (e && e.domEvent && typeof e.domEvent.preventDefault === 'function') {
+        e.domEvent.preventDefault();
+        e.domEvent.stopPropagation();
+      }
+      rightClickLatLng = e.latLng;
+      const customMenu = document.getElementById('custom-menu');
+      customMenu.style.display = 'block';
+      customMenu.style.left = (e.domEvent.clientX) + 'px';
+      customMenu.style.top = (e.domEvent.clientY) + 'px';
+    });
+
+    map.addListener('click', () => {
+      const customMenu = document.getElementById('custom-menu');
+      if (customMenu) customMenu.style.display = 'none';
+    });
+
+    // start live fetching of markers
+    fetchAndUpdateMarkers(AdvancedMarkerElement);
+    setInterval(() => fetchAndUpdateMarkers(AdvancedMarkerElement), 5000);
+    connectToButtonServer();
+  }
+
+  function connectToButtonServer() {
+    const pi_ip = "172.19.85.221"; 
+    const ws_url = `ws://${pi_ip}:8765`;
+
+    console.log(`Connecting to button server at ${ws_url}...`);
+    const socket = new WebSocket(ws_url);
+
+    socket.onopen = (event) => {
+      console.log("WebSocket connection established.");
+    };
+
+    socket.onmessage = (event) => {
+      console.log("Message from server: ", event.data);
+      try {
+        const data = JSON.parse(event.data);
+        
+        // Check if it's our landslide button event
+        if (data.event_type === "landslide_button_press") {
+          console.log("event button press received!");
+          showUploadModal(data.latitude, data.longitude);
+        }
+      } catch (e) {
+        console.error("Error parsing WebSocket message:", e);
+      }
+    };
+
+    socket.onclose = (event) => {
+      console.log("WebSocket disconnected. Reconnecting in 5 seconds...");
+      setTimeout(connectToButtonServer, 5000); // Auto-reconnect
+    };
+    
+    socket.onerror = (error) => {
+      console.error("WebSocket Error:", error);
+    };
+  }
+
+  // Now accepts AdvancedMarkerElement class as an argument
+  async function fetchAndUpdateMarkers(AdvancedMarkerElement) {
+    try {
+      const res = await fetch('get_locations.php');
+      const devices = await res.json();
+      const active = new Set();
+
+      for (const d of devices) {
+        const id = d.device_id;
+        const pos = { lat: d.lat, lng: d.lng };
+        active.add(id);
+
+        if (deviceMarkers[id]) {
+          deviceMarkers[id].position = pos; // Use .position property
+        } else {
+          // Create a DOM element for the marker's content
+          const markerIcon = document.createElement('div');
+          markerIcon.className = 'device-marker-icon';
+          markerIcon.title = `IVCS Unit: ${id}`;
+          
+          // Use new google.maps.marker.AdvancedMarkerElement
+          const marker = new AdvancedMarkerElement({
+            position: pos,
+            map,
+            content: markerIcon, // Use content property with the DOM element
+            title: `IVCS Unit: ${id}`
+          });
+          
+          // 'click' works on the element
+          marker.addListener('click', () => {
+            infoWindow.setContent(`<strong>Device ID: ${id}</strong>`);
+            // InfoWindow.open takes map and marker anchor
+            infoWindow.open(map, marker); 
+          });
+          deviceMarkers[id] = marker;
+        }
+      }
+
+      // cleanup stale markers
+      for (const id in deviceMarkers) {
+        if (!active.has(id)) {
+          // --- CHANGED ---
+          // Use map: null to remove AdvancedMarkerElement
+          deviceMarkers[id].map = null; 
+          delete deviceMarkers[id];
+        }
+      }
+    } catch (err) {
+      console.error('fetchAndUpdateMarkers error:', err);
+    }
+  }
+
+  function showUploadModal(lat, lng) {
+    const modal = document.getElementById('upload-modal-backdrop');
+    const latInput = document.getElementById('upload-lat');
+    const lngInput = document.getElementById('upload-lng');
+    const statusDiv = document.getElementById('upload-status');
+    const uploadBtn = document.getElementById('modal-upload-btn');
+    const fileInput = document.getElementById('image-input');
+    
+    latInput.value = lat;
+    lngInput.value = lng;
+    
+    // Reset form state
+    statusDiv.innerHTML = "";
+    statusDiv.style.color = "black";
+    uploadBtn.disabled = false;
+    fileInput.value = null; // Clear any previous file
+    
+    modal.style.display = "flex"; // Show the modal
+  }
+
+  
+  function hideUploadModal() {
+    const modal = document.getElementById('upload-modal-backdrop');
+    modal.style.display = "none";
+  }
+
+  /**
+   * Handles the file upload logic
+   */
+  async function handleImageUpload() {
+    const form = document.getElementById('upload-form');
+    const fileInput = document.getElementById('image-input');
+    const uploadBtn = document.getElementById('modal-upload-btn');
+    const statusDiv = document.getElementById('upload-status');
+    
+    // Get coords from the hidden form fields
+    const lat = parseFloat(document.getElementById('upload-lat').value);
+    const lng = parseFloat(document.getElementById('upload-lng').value);
+
+    if (fileInput.files.length === 0) {
+      statusDiv.innerHTML = "Please select a file to upload.";
+      statusDiv.style.color = "red";
+      return;
+    }
+
+    uploadBtn.disabled = true; // Prevent double-clicks
+    statusDiv.innerHTML = "Uploading and analyzing image, please wait...";
+    statusDiv.style.color = "blue";
+
+    // Create FormData from the form
+    const formData = new FormData(form);
+    
+    try {
+      const response = await fetch('upload_image.php', {
+        method: 'POST',
+        body: formData
+      });
+
+      const result = await response.json(); // Our new, detailed response
+
+      if (result.status === "success") {
+        // SUCCESS: Model found an event and it was logged
+        statusDiv.innerHTML = `Success! ${result.message}`;
+        statusDiv.style.color = "green";
+        
+        // Drop the new marker on the map!
+        createTempMarker(result.event_type, lat, lng);
+        
+        setTimeout(hideUploadModal, 2500); // Hide modal after 2 sec
+
+      } else if (result.status === "ignored") {
+        // IGNORED: Model ran but found 'normal_road'
+        statusDiv.innerHTML = `Analysis complete: ${result.message}`;
+        statusDiv.style.color = "#333"; // Neutral color
+        setTimeout(hideUploadModal, 2500); // Hide modal after 2.5 sec
+
+      } else {
+        // ERROR: Something went wrong
+        throw new Error(result.message || "Unknown error during analysis.");
+      }
+
+    } catch (error) {
+      console.error("Upload failed:", error);
+      statusDiv.innerHTML = `Error: ${error.message}`;
+      statusDiv.style.color = "red";
+      uploadBtn.disabled = false; // Re-enable button on failure
+    }
+  }
+
+  function setupMenuHandlers() {
+    const menuButton = document.getElementById('menuButton');
+    const sideMenu = document.getElementById('sideMenu');
+
+    if (!menuButton || !sideMenu) return;
+
+    menuButton.addEventListener('click', (ev) => {
+      ev.stopPropagation(); // Stop the click from propagating to the map
+      sideMenu.classList.toggle('open');
+    });
+
+    // navigation items 
+    document.getElementById('btn-dashboard').addEventListener('click', () => {
+      sideMenu.classList.remove('open');
+      window.location.href = 'alert.html';
+    });
+    document.getElementById('btn-ambulance').addEventListener('click', () => {
+      sideMenu.classList.remove('open');
+      window.location.href = 'ambulance.html';
+    });
+    document.getElementById('btn-violations').addEventListener('click', () => {
+      sideMenu.classList.remove('open');
+      window.location.href = 'violations.html';
+    });
+
+    // context menu options 
+    document.getElementById('report-landslide').addEventListener('click', () => {
+      document.getElementById('custom-menu').style.display = 'none';
+      if (rightClickLatLng) {
+        // Call the upload modal, passing the lat/lng from the right-click
+        showUploadModal(rightClickLatLng.lat(), rightClickLatLng.lng());
+      } else {
+        console.error("No right-click location found for landslide report.");
+        alert("Error: Could not get location. Please right-click on the map again.");
+      }
+    });
+    
+    document.getElementById('modal-cancel-btn').addEventListener('click', hideUploadModal);
+    
+    document.getElementById('upload-form').addEventListener('submit', (e) => {
+      e.preventDefault(); // Stop default form submission
+      handleImageUpload();
+    });
+  }
+
+  async function createTempMarker(eventType, lat, lng) {
+    if (!map || lat === undefined || lng === undefined) return;
+    
+    let iconUrl;
+    switch (eventType) {
+      case 'landslide':
+        iconUrl = 'land_slide.png';
+        break;
+      case 'car_crash':
+        iconUrl = 'car_crash.png';
+        break;
+      case 'road_maintenance':
+        iconUrl = 'road_maintenance.png';
+        break;
+      default:
+        return; 
+    }
+
+    // Await the marker library
+    const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+
+    const markerIcon = document.createElement('img');
+    markerIcon.src = iconUrl;
+    markerIcon.style.width = '40px';
+    markerIcon.style.height = '40px';
+    markerIcon.style.boxShadow = '0 2px 5px rgba(0,0,0,0.4)';
+    markerIcon.style.borderRadius = '5px';
+    
+    const position = { lat: lat, lng: lng };
+
+    const marker = new AdvancedMarkerElement({
+      position,
+      map,
+      content: markerIcon,
+      // animation: google.maps.Animation.DROP // Drop animation not in AdvancedMarkerElement
+    });
+    
+    // Remove the marker after 150 seconds
+    setTimeout(() => {
+        marker.map = null; // Set map to null to remove
+    }, 150000);
+  }
+
+  // wire things up on DOM ready
+  document.addEventListener('DOMContentLoaded', () => {
+    setupMenuHandlers();
+  });
+
+  // expose initMap for Google callback
+  window.initMap = initMap;
+</script>
+
+<script async
+  src="https://maps.googleapis.com/maps/api/js?key=**redacted**&callback=initMap&libraries=marker&v=beta">
+</script>
+  
+</body>
+</html>

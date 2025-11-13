@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>IVCS - Ambulance Route Planner</title>
+    <style>
+        #map {
+            height: 100vh;
+            width: 100%;
+        }
+        
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            overflow: hidden; 
+        }
+
+        .menu-toggle {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 2001; 
+            background: #fff;
+            border: none;
+            border-radius: 4px;
+            padding: 10px;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+
+        .menu-toggle .bar {
+            display: block;
+            width: 22px;
+            height: 3px;
+            background-color: #333;
+            margin: 4px 0;
+        }
+
+        /* --- Side Menu Panel  --- */
+        .side-menu {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 140vh;
+            width: 300px;
+            background-color: #fff;
+            z-index: 2000; 
+            box-shadow: 0 0 10px rgba(0,0,0,0.5); 
+            transform: translateX(-100%); 
+            transition: transform 0.3s ease-in-out;
+            padding: 60px 20px 20px 20px;
+            box-sizing: border-box;
+        }
+
+        .side-menu.open {
+            transform: translateX(0);
+        }
+
+        .side-menu h2 {
+            margin-top: 0;
+        }
+        .side-menu ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .side-menu ul li {
+            padding: 15px 10px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+        .side-menu ul li:hover {
+            background-color: #f9f9f9;
+        }
+
+        /* --- Directions Panel --- */
+        #directions-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+            width: 300px;
+            box-sizing: border-box;
+            max-height: 90vh; 
+            display: flex;
+            flex-direction: column;
+        }
+
+        #directions-panel h2 {
+            margin-top: 0;
+            font-size: 1.2em;
+        }
+
+        #directions-panel input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        #directions-panel button {
+            width: 100%;
+            padding: 10px;
+            background-color: #0044FF;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+            margin-bottom: 5px;
+        }
+
+        #directions-panel button:hover {
+            background-color: #0033CC;
+        }
+        
+        #directions-panel button#clear-route {
+             background-color: #888;
+        }
+        #directions-panel button#clear-route:hover {
+             background-color: #666;
+        }
+
+        /* --- Style for the text directions panel--- */
+        #directions-text-panel {
+            margin-top: 15px;
+            flex-grow: 1; 
+            overflow-y: auto; 
+            border-top: 1px solid #eee;
+            padding-top: 10px;
+        }
+
+        /* --- Device (ambulance) marker--- */
+        .device-marker-icon {
+          width: 16px;
+          height: 16px;
+          background-color: #0044FF;
+          border-radius: 50%;
+          border: 2px solid white;
+          box-shadow: 0 0 4px rgba(0,0,0,0.5);
+        }
+        
+        /* --- Traffic light markers --- */
+        .traffic-light-marker {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          border: 2px solid white;
+          box-shadow: 0 0 5px rgba(0,0,0,0.7);
+          opacity: 0.9;
+        }
+        .tl-green { background-color: #2ecc71; }
+        .tl-yellow { background-color: #f1c40f; }
+        .tl-red { background-color: #e74c3c; }
+        
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <button class="menu-toggle" id="menuButton">
+        <span class="bar"></span>
+        <span class="bar"></span>
+        <span class="bar"></span>
+    </button>
+
+    <div class="side-menu" id="sideMenu">
+        <h2>IVCS Project Menu</h2>
+        <ul>
+            <li id="btn-dashboard">Alerts</li>
+            <li id="btn-ambulance">Ambulance Routes</li>
+            <li id="btn-violations">Live Violation Feed</li>
+            <li id="btn-home">Back to Main Map</li> 
+        </ul>
+    </div>
+
+    <div id="directions-panel">
+        <h2>Ambulance Route Planner</h2>
+        <!--Removed 'value' attributes from these inputs -->
+        <input type="text" id="start-point" placeholder="Enter start location">
+        <input type="text" id="end-point" placeholder="Enter destination">
+        <button id="calculate-route">Calculate and Send Route</button>
+        <button id="clear-route">Clear Route</button>
+        <button id="start-animation" style="background-color: #28a745;">Start Ambulance Sim</button>
+        <div id="directions-text-panel"></div>
+    </div>
+
+
+    <script>
+        
+        let map; 
+        let directionsService;
+        let directionsRenderer;
+
+        // --- Globals for simulation ---
+        let deviceMarkers = {};
+        let infoWindow;
+        let AdvancedMarkerElement; // To store the marker class
+        let ambulanceInterval = null; // To control the simulation
+        // --- Globals for 4-way traffic light logic ---
+        let trafficLights = {}; // Holds all individual light objects 
+        let junctionStates = {}; // Holds the state for each JUNCTION 
+
+        // --- Data for our simulated ambulance (UOM to Nawaloka) ---
+        const ambulanceSim = {
+          deviceId: "AMBULANCE_01",
+          currentIndex: 0,
+          route: [
+            { lat: 6.912659322395025, lng: 79.85365530301355 },
+            { lat: 6.912635573529542, lng: 79.85384987481882 },
+            { lat: 6.912641906560459, lng: 79.85410186125513 },
+            { lat: 6.912660905652831, lng: 79.85431716615203 },
+            { lat: 6.912719486182658, lng: 79.85459307537184 },
+            { lat: 6.912790732762845, lng: 79.85486260516767 },
+            { lat: 6.912850896533316, lng: 79.85518954959454 },
+            { lat: 6.912911060298914, lng: 79.85550214043239 }, 
+            { lat: 6.9129402627636365, lng: 79.85569358318992 }, 
+            { lat: 6.913017050708192, lng: 79.85569198833905 },
+            { lat: 6.913158864658697, lng: 79.8556965227325 }, 
+            { lat: 6.913264100572709, lng: 79.8557156941495 },
+            { lat: 6.913426432509968, lng: 79.85575290923488 },
+            { lat: 6.91357533003951, lng: 79.85578110249378 },
+            { lat: 6.9137264665729985, lng: 79.85580478482085 },
+            { lat: 6.91388432023414, lng: 79.85583636125692 },
+            { lat: 6.914072401132368, lng: 79.8558747040799 },
+            { lat: 6.91425793745029, lng: 79.8559094078321 },
+            { lat: 6.914351977829852, lng: 79.85592970696958 },
+            { lat: 6.9144695282779605, lng: 79.85593872880845 }
+          ]
+        };
+        
+        // --- Data structure for all junctions ---
+        const junctions = {
+            'uom_junction': {
+                // Center point for proximity checks
+                position: { lat: 6.912924269703915, lng: 79.85570824673084 },
+                // Durations for the normal cycle
+                durations: {
+                    green: 10000, // 10 seconds green
+                    yellow: 2000, // 2 seconds yellow
+                    all_red: 1000  // 1 second all-red between cycles
+                },
+                // The lights belonging to this junction
+                lights: {
+                    'tl_uom_w': { direction: 'west', pair: 'ew', position: { lat: 6.9129292647856495, lng: 79.85567189200982} },
+                    'tl_uom_e': { direction: 'east', pair: 'ew', position: { lat: 6.9129179482686105, lng: 79.85574297054163} },
+                    'tl_uom_n': { direction: 'north', pair: 'ns', position: { lat: 6.91295456052862, lng: 79.85571816011071} },
+                    'tl_uom_s': { direction: 'south', pair: 'ns', position: { lat: 6.912895315233081, lng: 79.8557000552072} }
+                }
+            }
+        };
+
+        // --- Google Map function ---
+        async function initMap() { 
+            
+            const { Map } = await google.maps.importLibrary("maps");
+            const { AdvancedMarkerElement: MarkerLib } = await google.maps.importLibrary("marker");
+            
+            AdvancedMarkerElement = MarkerLib;
+
+            // --- start at the uom on the load---
+            const mapCenter = { lat: 6.794967988754714, lng:  79.90073971433972 };
+
+            map = new Map(document.getElementById("map"), {
+                zoom: 19, // Zoom in  
+                center: mapCenter,
+                mapTypeId: 'roadmap',
+                disableDefaultUI: true,
+                mapId: '6e14471ffcb2dc052ca4015a'
+            });
+
+            // --- Route Planner logic---
+            directionsService = new google.maps.DirectionsService();
+            directionsRenderer = new google.maps.DirectionsRenderer();
+            directionsRenderer.setMap(map); 
+            directionsRenderer.setPanel(document.getElementById("directions-text-panel"));
+
+            const calcButton = document.getElementById("calculate-route");
+            const clearButton = document.getElementById("clear-route");
+            
+            calcButton.addEventListener("click", calculateAndDisplayRoute);
+            clearButton.addEventListener("click", clearRoute);
+            
+            const startSimButton = document.getElementById("start-animation"); 
+            
+            startSimButton.addEventListener("click", () => {
+                // Check if the simulation is already running
+                if (ambulanceInterval) {
+                    console.log("Simulation is already running."); //log to the console
+                    return; 
+                }
+                
+                console.log("Starting ambulance simulation...");
+                // Start the simulation and store its ID
+                ambulanceInterval = setInterval(runAmbulanceSimulation, 1000);
+                
+                // Disable the button after click
+                startSimButton.disabled = true; 
+                startSimButton.textContent = "Simulation Running";
+                startSimButton.style.backgroundColor = "#aaa";
+            });
+            // --- Initialize simulations ---
+            infoWindow = new google.maps.InfoWindow(); 
+            initializeTrafficLights();
+            
+            // Start live fetching of device markers (for the ambulance)
+            fetchAndUpdateMarkers(); // Initial fetch
+            setInterval(fetchAndUpdateMarkers, 1000); 
+
+            // Start the traffic light update loop
+            setInterval(updateTrafficLights, 1000);
+
+            // Start the ambulance simulation
+            // setInterval(runAmbulanceSimulation, 1000);
+        }
+
+        // --- Route Planner logic (from before) ---
+        function calculateAndDisplayRoute() {
+            const start = document.getElementById("start-point").value;
+            const end = document.getElementById("end-point").value;
+
+            if (!start || !end) {
+                // error handling: warning for empty fields
+                console.warn("Please enter both a start and end location.");
+                return;
+            }
+
+            directionsService.route(
+                {
+                    origin: start,
+                    destination: end,
+                    travelMode: google.maps.TravelMode.DRIVING,
+                },
+                (response, status) => {
+                    if (status === "OK") {
+                        directionsRenderer.setDirections(response);
+                    } else {
+                        console.error("Directions request failed due to " + status);
+                    }
+                }
+            );
+        }
+
+        // --- Route Planner logic  ---
+        function clearRoute() {
+            directionsRenderer.setDirections({routes: []}); 
+            document.getElementById("start-point").value = "";
+            document.getElementById("end-point").value = "";
+            document.getElementById("directions-text-panel").innerHTML = "";
+        }
+
+
+        // --- Device fetch function ---
+        async function fetchAndUpdateMarkers() { 
+            try {
+              const res = await fetch('get_locations.php');
+              const devices = await res.json();
+              const active = new Set();
+
+              for (const d of devices) {
+                const id = d.device_id;
+                const pos = { lat: d.lat, lng: d.lng };
+                active.add(id);
+
+                if (deviceMarkers[id]) {
+                  deviceMarkers[id].position = pos;
+                } else {
+                  const markerIcon = document.createElement('div');
+                  markerIcon.className = 'device-marker-icon';
+                  markerIcon.title = `IVCS Unit: ${id}`;
+                  
+                  // Style simulated ambulance
+                  if (id === ambulanceSim.deviceId) {
+                    markerIcon.style.backgroundColor = '#FF0000'; // Make ambulance red
+                    markerIcon.style.width = '20px';
+                    markerIcon.style.height = '20px';
+                  }
+
+                  const marker = new AdvancedMarkerElement({
+                    position: pos,
+                    map,
+                    content: markerIcon,
+                    title: `IVCS Unit: ${id}`
+                  });
+                  
+                  marker.addListener('click', () => {
+                    infoWindow.setContent(`<strong>Device ID: ${id}</strong>`);
+                    infoWindow.open(map, marker); 
+                  });
+                  deviceMarkers[id] = marker;
+                }
+              }
+
+              // cleanup stale markers
+              for (const id in deviceMarkers) {
+                if (!active.has(id)) {
+                  deviceMarkers[id].map = null; 
+                  delete deviceMarkers[id];
+                }
+              }
+            } catch (err) {
+              console.error('fetchAndUpdateMarkers error:', err);
+            }
+        }
+
+        // --- to create the 4-way traffic lights ---
+        function initializeTrafficLights() {
+            
+            for (const junctionId in junctions) {
+                const junction = junctions[junctionId];
+                
+                // Add this junction to the state tracker
+                junctionStates[junctionId] = {
+                    state: 'ns_green', // Start with North-South green
+                    lastChange: Date.now(),
+                    preempted: false,
+                    wasPreempted: false
+                };
+
+                // Create markers for each light in the junction
+                for (const lightId in junction.lights) {
+                    const lightDef = junction.lights[lightId];
+                    
+                    const markerContent = document.createElement('div');
+                    markerContent.className = 'traffic-light-marker';
+
+                    const marker = new AdvancedMarkerElement({
+                        position: lightDef.position,
+                        map: map,
+                        content: markerContent,
+                        title: `Traffic Light: ${lightId}`
+                    });
+                    
+                    // Add to the global trafficLights object
+                    trafficLights[lightId] = {
+                        ...lightDef,
+                        id: lightId,
+                        junctionId: junctionId,
+                        marker: marker,
+                        state: 'red' // All lights start red
+                    };
+                }
+                
+                // draw the geofence for the junction
+                new google.maps.Circle({
+                    strokeColor: "#0000FF",
+                    strokeOpacity: 0.5,
+                    strokeWeight: 2,
+                    fillColor: "#0000FF",
+                    fillOpacity: 0.10,
+                    map: map,
+                    center: junction.position,
+                    radius: 100, // 100 meter radius
+                });
+            }
+            
+            // Set the initial state for the first cycle
+            updateLightStates(junctions['uom_junction'], 'ns_green');
+        }
+
+        // --- Helper function to update a light's visual state ---
+        function updateTrafficLightMarker(light, forceState) {
+            light.state = forceState;
+            const markerContent = light.marker.content;
+            markerContent.className = 'traffic-light-marker'; // Reset classes
+            
+            if (light.state === 'green') {
+              markerContent.classList.add('tl-green');
+            } else if (light.state === 'yellow') {
+              markerContent.classList.add('tl-yellow');
+            } else {
+              markerContent.classList.add('tl-red');
+            }
+        }
+        
+        // --- Helper function to set all lights in a junction based on state ---
+        function updateLightStates(junction, newState) {
+            // Loop through all lights associated with this junction
+            for (const lightId in junction.lights) {
+                const lightDef = junction.lights[lightId]; 
+                const light = trafficLights[lightId];     // full object with the marker
+                
+                if (!light) continue; // Safety check
+
+                if (newState === 'ns_green') {
+                    if (lightDef.pair === 'ns') updateTrafficLightMarker(light, 'green');
+                    else updateTrafficLightMarker(light, 'red');
+                } else if (newState === 'ns_yellow') {
+                    if (lightDef.pair === 'ns') updateTrafficLightMarker(light, 'yellow');
+                    else updateTrafficLightMarker(light, 'red');
+                } else if (newState === 'ew_green') {
+                    if (lightDef.pair === 'ew') updateTrafficLightMarker(light, 'green');
+                    else updateTrafficLightMarker(light, 'red');
+                } else if (newState === 'ew_yellow') {
+                    if (lightDef.pair === 'ew') updateTrafficLightMarker(light, 'yellow');
+                    else updateTrafficLightMarker(light, 'red');
+                } else if (newState === 'all_red') {
+                    updateTrafficLightMarker(light, 'red');
+                }
+            }
+        }
+
+        // --- Main logic loop for traffic lights ---
+        function updateTrafficLights() {
+            const currentTime = Date.now();
+            
+            // 1. Check for ambulance preemption
+            const ambulanceMarker = deviceMarkers[ambulanceSim.deviceId];
+            let ambulancePos = null;
+            if (ambulanceMarker) {
+              ambulancePos = ambulanceMarker.position;
+            }
+
+            for (const junctionId in junctionStates) {
+                const junction = junctions[junctionId];
+                const state = junctionStates[junctionId];
+                
+                state.wasPreempted = state.preempted; // Store previous state
+                state.preempted = false; // Assume not preempted this tick
+
+                if (ambulancePos) {
+                    const distance = getDistance(junction.position, ambulancePos);
+                    
+                    if (distance < 100) { // --- 100m LOGIC ---
+                        state.preempted = true;
+                    }
+                }
+
+                // 2. Handle state logic
+                if (state.preempted) {
+                    // --- AMBULANCE OVERRIDE ---
+                    for (const lightId in junction.lights) {
+                        const lightDef = junction.lights[lightId];
+                        const light = trafficLights[lightId];
+                        if (!light) continue;
+                        
+                        // Your specific logic:
+                        if (lightDef.direction === 'west') {
+                            updateTrafficLightMarker(light, 'green');
+                        } else {
+                            updateTrafficLightMarker(light, 'red');
+                        }
+                    }
+                    // Keep resetting the state so it doesn't cycle
+                    state.state = 'preempted'; 
+                    state.lastChange = currentTime;
+                    continue; 
+                
+                } else if (state.wasPreempted && !state.preempted) {
+                    // --- AMBULANCE JUST LEFT ---
+                    // Transition back to normal.
+                    console.log("Ambulance left, transitioning to normal cycle");
+
+                    for (const lightId in junction.lights) {
+                        const lightDef = junction.lights[lightId];
+                        const light = trafficLights[lightId];
+                        if (!light) continue;
+                        
+                        // Your specific logic:
+                        if (lightDef.direction === 'west' || lightDef.direction === 'north') {
+                            updateTrafficLightMarker(light, 'yellow');
+                        } else {
+                            updateTrafficLightMarker(light, 'red');
+                        }
+                    }
+                    state.state = 'post_preempt_yellow'; // A special state
+                    state.lastChange = currentTime;
+                    continue;
+                }
+
+                // 3. Normal cycle logic (if not preempted)
+                const timeInState = currentTime - state.lastChange;
+                const durations = junction.durations;
+
+                switch (state.state) {
+                    case 'ns_green':
+                        if (timeInState > durations.green) {
+                            updateLightStates(junction, 'ns_yellow');
+                            state.state = 'ns_yellow';
+                            state.lastChange = currentTime;
+                        }
+                        break;
+                    
+                    case 'ns_yellow':
+                        if (timeInState > durations.yellow) {
+                            updateLightStates(junction, 'all_red');
+                            state.state = 'all_red_ns_to_ew';
+                            state.lastChange = currentTime;
+                        }
+                        break;
+                    
+                    case 'all_red_ns_to_ew':
+                        if (timeInState > durations.all_red) {
+                            updateLightStates(junction, 'ew_green');
+                            state.state = 'ew_green';
+                            state.lastChange = currentTime;
+                        }
+                        break;
+                    
+                    case 'ew_green':
+                        if (timeInState > durations.green) {
+                            updateLightStates(junction, 'ew_yellow');
+                            state.state = 'ew_yellow';
+                            state.lastChange = currentTime;
+                        }
+                        break;
+                    
+                    case 'ew_yellow':
+                        if (timeInState > durations.yellow) {
+                            updateLightStates(junction, 'all_red');
+                            state.state = 'all_red_ew_to_ns';
+                            state.lastChange = currentTime;
+                        }
+                        break;
+                    
+                    case 'all_red_ew_to_ns':
+                        if (timeInState > durations.all_red) {
+                            updateLightStates(junction, 'ns_green');
+                            state.state = 'ns_green';
+                            state.lastChange = currentTime;
+                        }
+                        break;
+                        
+                    case 'post_preempt_yellow':
+                        // After the ambulance override, W and N were yellow.
+                        // Wait for yellow duration, then go all_red, then start NS cycle.
+                        if (timeInState > durations.yellow) {
+                            updateLightStates(junction, 'all_red');
+                            state.state = 'all_red_ew_to_ns'; // This state leads to 'ns_green'
+                            state.lastChange = currentTime;
+                        }
+                        break;
+                        
+                    case 'preempted':
+                        // This case should be handled by the preemption logic above,
+                        // but if we fall through, just reset to normal.
+                        console.log("Exited preempted state, starting normal cycle.");
+                        state.state = 'all_red_ew_to_ns';
+                        state.lastChange = currentTime;
+                        break;
+                }
+            }
+        }
+
+        async function runAmbulanceSimulation() {
+            const sim = ambulanceSim;
+            
+            // Get current and next positions for animation
+            const startPos = sim.route[sim.currentIndex]; // This is the position to send to DB
+            const nextIndex = (sim.currentIndex + 1) % sim.route.length;
+            const endPos = sim.route[nextIndex];
+
+            const payload = {
+              device_id: sim.deviceId,
+              lat: startPos.lat,
+              lng: startPos.lng
+            };
+
+            try {
+              await fetch('update_location.php', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+              });
+            } catch (err) {
+              console.error("Ambulance simulation fetch error:", err);
+            }
+
+            const marker = deviceMarkers[sim.deviceId];
+            if (!marker) return; // Marker not created yet
+
+            // Animate from startPos to endPos over 1 second (1000ms)
+            const steps = 30; // 30 frames
+            const duration = 1000 / steps; // time per frame
+            let step = 0;
+
+            const animate = setInterval(() => {
+                step++;
+                const lat = startPos.lat + (endPos.lat - startPos.lat) * (step / steps);
+                const lng = startPos.lng + (endPos.lng - startPos.lng) * (step / steps);
+                marker.position = { lat, lng };
+                if (step >= steps) {
+                    clearInterval(animate);
+                }
+            }, duration); 
+
+            // Move to the next point in the route for the *next* interval
+            sim.currentIndex = nextIndex;
+        }
+
+        // --- Haversine distance function: output in meters ---
+        function getDistance(pos1, pos2) {
+            const R = 6371e3;
+            const lat1 = pos1.lat * Math.PI/180; 
+            const lat2 = pos2.lat * Math.PI/180;
+            const deltaLat = (pos2.lat-pos1.lat) * Math.PI/180;
+            const deltaLng = (pos2.lng-pos1.lng) * Math.PI/180;
+
+            const a = Math.sin(deltaLat/2) * Math.sin(deltaLat/2) +
+                      Math.cos(lat1) * Math.cos(lat2) *
+                      Math.sin(deltaLng/2) * Math.sin(deltaLng/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c; 
+        }
+
+
+        // --- for Menu Toggle  ---
+        document.addEventListener("DOMContentLoaded", function() {
+            
+            const menuButton = document.getElementById("menuButton");
+            const sideMenu = document.getElementById("sideMenu");
+            
+            const dashboardBtn = document.getElementById("btn-dashboard");
+            const ambulanceBtn = document.getElementById("btn-ambulance");
+            const violationsBtn = document.getElementById("btn-violations");
+            const homeBtn = document.getElementById("btn-home"); 
+            
+            menuButton.addEventListener("click", function() {
+                sideMenu.classList.toggle("open");
+            });
+            
+            dashboardBtn.addEventListener("click", function() {
+                window.location.href = "alert.html";
+                sideMenu.classList.remove("open");
+            });
+
+            ambulanceBtn.addEventListener("click", function() {
+                console.log("Already on Ambulance page");
+                sideMenu.classList.remove("open");
+            });
+
+            violationsBtn.addEventListener("click", function() {
+                window.location.href = "violations.html";
+                sideMenu.classList.remove("open");
+            });
+
+            homeBtn.addEventListener("click", function() {
+                window.location.href = "index.html"; 
+                sideMenu.classList.remove("open");
+            });
+        });
+    </script>
+
+    <script async
+         src="https://maps.googleapis.com/maps/api/js?key=**readacted**&callback=initMap&libraries=marker&v=beta">
+    </script>
+
+</body>
+</html>
+

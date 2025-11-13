@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IVCS Alert Log</title>
+    <style>
+        /* "Clean and nice" styling */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            padding: 20px;
+            color: #333;
+        }
+
+        h1 {
+            color: #253021; /* Dark blue title */
+            border-bottom: 2px solid #c5cae9;
+            padding-bottom: 10px;
+        }
+
+        #alert-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+            background-color: #ffffff;
+        }
+
+        #alert-table th,
+        #alert-table td {
+            border: 1px solid #ddd;
+            padding: 12px 15px;
+            text-align: left;
+        }
+
+        #alert-table thead {
+            background-color: #A9A9A9; /* Primary blue */
+            color: #ffffff;
+        }
+
+        /* Alternating row colors */
+        #alert-table tbody tr:nth-of-type(even) {
+            background-color: #f9f9f9;
+        }
+
+        #alert-table tbody tr:hover {
+            background-color: #e8eaf6; /* Light indigo on hover */
+        }
+        
+        /* Color-code event types */
+        .event-Landslide { color: #8d6e63; font-weight: bold; } /* Brown */
+        .event-Car-Crash { color: #d32f2f; font-weight: bold; } /* Red */
+        .event-Road-Maintenance { color: #f57c00; font-weight: bold; } /* Orange */
+
+    </style>
+</head>
+<body>
+
+    <h1>IVCS Alert Log</h1>
+    <p>Displaying all incoming alerts. Alerts logged by IVCS unit users as they encounter them on-the-go.</p>
+
+    <table id="alert-table">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Event Type</th>
+                <th>Latitude</th>
+                <th>Longitude</th>
+            </tr>
+        </thead>
+        <tbody id="alert-body">
+            <tr>
+                <td colspan="4" style="text-align: center;">Loading alerts...</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <script>
+        // This function fetches data from our PHP script and builds the table
+        async function fetchAlerts() {
+            try {
+                const response = await fetch('get_alerts.php');
+                const alerts = await response.json();
+
+                const tableBody = document.getElementById('alert-body');
+                tableBody.innerHTML = ''; // Clear existing rows
+
+                if (alerts.length === 0) {
+                    tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center;">No alerts logged yet.</td></tr>';
+                    return;
+                }
+
+                // Loop through each alert and create a table row
+                alerts.forEach(alert => {
+                    const row = document.createElement('tr');
+                    
+                    // Creates a "slug" for the CSS class (e.g., "Car Crash" -> "event-Car-Crash")
+                    const eventClass = 'event-' + alert.event_type.replace(' ', '-');
+
+                    row.innerHTML = `
+                        <td>${alert.event_time}</td>
+                        <td class="${eventClass}">${alert.event_type}</td>
+                        <td>${alert.latitude}</td>
+                        <td>${alert.longitude}</td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+
+            } catch (error) {
+                console.error('Error fetching alerts:', error);
+                const tableBody = document.getElementById('alert-body');
+                tableBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: red;">Error loading data.</td></tr>';
+            }
+        }
+
+        // Run the function when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchAlerts(); // Fetch immediately
+            
+            // Set the page to auto-refresh every 10 seconds (10000 milliseconds)
+            setInterval(fetchAlerts, 10000); 
+        });
+    </script>
+
+</body>
+</html>
